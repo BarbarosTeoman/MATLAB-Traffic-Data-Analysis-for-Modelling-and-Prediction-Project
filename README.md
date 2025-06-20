@@ -15,18 +15,21 @@ git lfs pull
 1. **Open MATLAB** in the project root.
 2. Run **`main.m`**
 
+> ⚠️ **Note**: The project will automatically **load pre-processed `.mat` files** (TrainDS, ValDS, Test, and the trained network). This avoids the need to re-run the full data preprocessing and training pipeline, which can be time-consuming.
+
 ---
 
 ## Repository layout
 
 ```
 .
+├── main.m                   # Main MATLAB file
 ├── ngsim_cached_data.mat    # binary cache (LFS)
-├── TrainDS.mat              # Training data
-├── ValDS.mat                # Validation data (LFS)
-├── Test.mat                 # Test data
-├── trainedNetwork.mat       # saved network after training
-├── trainingInfo.mat         # saved training information after training
+├── TrainDS.mat              # Preprocessed training dataset
+├── ValDS.mat                # Preprocessed validation dataset (LFS)
+├── Test.mat                 # Preprocessed test dataset
+├── trainedNetwork.mat       # Pre-trained network
+├── trainingInfo.mat         # Training log and metrics
 ├── LICENSE
 └── README.md
 ```
@@ -46,6 +49,8 @@ git lfs pull
 | CNN filter sizes | 3×3 @ 32, 64                     |
 | BiLSTM units     | 64 (occupancy) + 32 (kinematics) |
 | Output           | (X, Y, Speed) 30 frames ahead    |
+
+> Training is skipped by default — the pretrained model is automatically loaded unless deleted.
 
 ---
 
