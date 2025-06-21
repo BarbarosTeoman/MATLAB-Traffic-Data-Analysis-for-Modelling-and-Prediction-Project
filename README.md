@@ -23,13 +23,16 @@ git lfs pull
 
 ```
 .
-├── main.m                   # Main MATLAB file
-├── ngsim_cached_data.mat    # binary cache (LFS)
-├── TrainDS.mat              # Preprocessed training dataset
-├── ValDS.mat                # Preprocessed validation dataset (LFS)
-├── Test.mat                 # Preprocessed test dataset
-├── trainedNetwork.mat       # Pre-trained network
-├── trainingInfo.mat         # Training log and metrics
+├── main.m                      # Main MATLAB file
+├── ngsim_cached_data.mat       # binary cache (LFS)
+├── neighInputOdd.mat           # Preprocessed LSTM Input (LFS)
+├── targetInputOddCentered.mat  # Preprocessed LSTM Input (LFS)
+├── targetInputEvenCentered.mat # Preprocessed LSTM Input (LFS)
+├── TrainDS.mat                 # Preprocessed training dataset
+├── ValDS.mat                   # Preprocessed validation dataset (LFS)
+├── Test.mat                    # Preprocessed test dataset
+├── trainedNetwork.mat          # Pre-trained network
+├── trainingInfo.mat            # Training log and metrics
 ├── LICENSE
 └── README.md
 ```
