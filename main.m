@@ -1,30 +1,17 @@
 clc
 clear
 
-function [TrainDS, ValDS, Test] = loadOrCacheNGSIMData(matCacheFile)
-% loadOrCacheNGSIMData loads or processes the NGSIM traffic dataset, caches it,
-% prepares it for deep learning training, and returns the Train/Validation/Test sets.
+function loadOrCacheNGSIMData(matCacheFile)
+% LOADORCACHENGSIMDATA prepares and caches training/validation/test data.
 %
 % INPUT:
-%   - matCacheFile (string, optional): Path to a .mat file used for caching 
-%     the processed NGSIM data. Default = 'ngsim_cached_data.mat'
+%   - matCacheFile (string, optional): Path to cache file (default: 'ngsim_cached_data.mat')
 %
-% OUTPUT:
-%   - TrainDS: Combined datastore of input features and targets for training
-%   - ValDS: Combined datastore for validation
-%   - Test: Structure containing test inputs and targets (fields: X1Test, X2Test, YTest)
-arguments (Input)
-    matCacheFile string
-end
+% This function loads or processes raw NGSIM vehicle data, extracts features,
+% centers target trajectories, and calls a helper function to split and save datasets.
 
-arguments (Output)
-    TrainDS 
-    ValDS 
-    Test struct
-end
-
-    if nargin < 1
-        matCacheFile = 'ngsim_cached_data.mat';
+    arguments (Input)
+        matCacheFile string = "ngsim_cached_data.mat"
     end
 
     if isfile(matCacheFile)
@@ -38,7 +25,7 @@ end
             'v_Length', 'v_Width', 'v_Class', 'v_Vel', 'v_Acc', ...
             'Lane_ID', 'Preceeding', 'Following', 'Space_Hdwy', 'Time_Hdwy'};
 
-        % List of raw NGSIM data files
+        % List of input NGSIM data files
         files = {
             'data/trajectories-0750am-0805am.txt', ...
             'data/trajectories-0805am-0820am.txt', ...
@@ -48,7 +35,7 @@ end
             'data/trajectories-0400-0415.txt'
         };
 
-        % Load all raw data into tables
+        % Load raw data
         datas = cell(1, numel(files));
         for i = 1:numel(files)
             disp("Loading: " + files{i});
@@ -56,77 +43,107 @@ end
             datas{i} = array2table(raw, 'VariableNames', varNames);
         end
 
-        % Save to cache for future use
         save(matCacheFile, 'datas');
         disp("Data cached to: " + matCacheFile);
     end
 
-    % Feature and target extraction
-    neigh = all_chunks(datas);               % Feature tensors
-    target = all_target_chunks(datas);       % Target tensors
+    % Extract features and targets
+    neigh = all_chunks(datas);
+    target = all_target_chunks(datas);
 
-    % Separate odd and even sequences
+    % Separate input and prediction targets
     input_neigh_odd = neigh{1:2:end};
     input_target_odd = target{1:2:end};
-    input_target_even = target{1:2:end};
+    input_target_even = target{2:2:end};
 
-    % Save raw tensors
     save("neighInputOdd.mat", "input_neigh_odd");
-    save("targetInputOdd.mat", "input_target_odd");
-    save("targetInputEven.mat", "input_target_even");
 
-    % Load saved tensors
-    load("neighInputOdd.mat");
-    load("targetInputOdd.mat");
-    load("targetInputEven.mat");
-
-    % Center the target sequences relative to the last frame
+    % Center target data by subtracting last frame's position
     input_target_odd_centered = input_target_odd;
     input_target_even_centered = input_target_even;
     for k = 1:size(input_target_odd, 3)
-        last_row = input_target_odd(30, 1:2, k); % Position at last frame
+        last_row = input_target_odd(30, 1:2, k);
         for row = 1:30
             input_target_odd_centered(row, 1:2, k) = input_target_odd(row, 1:2, k) - last_row;
             input_target_even_centered(row, 1:2, k) = input_target_even(row, 1:2, k) - last_row;
         end
     end
 
-    % Save centered target data
     save("targetInputOddCentered.mat", "input_target_odd_centered");
     save("targetInputEvenCentered.mat", "input_target_even_centered");
+end
 
-    % Shuffle and split indices for training, validation, test
+function [TrainDS, ValDS, Test] = split_and_prepare_datasets(seed)
+% SPLIT_AND_PREPARE_DATASETS loads preprocessed input/target tensors,
+% shuffles and partitions them into training, validation, and test sets,
+% and saves the results to disk.
+%
+% INPUT:
+%   seed : (integer) Random seed for reproducibility of data splitting
+%
+% OUTPUTS:
+%   TrainDS : Combined datastore for training (X1, X2 → Y)
+%   ValDS   : Combined datastore for validation
+%   Test    : Struct containing raw test arrays (X1Test, X2Test, YTest)
+
+    arguments
+        seed int32 = NaN
+    end
+
+    if isfile("TrainDS.mat") && isfile("ValDS.mat") && isfile("Test.mat")
+        disp("Loading train, validation and test datastores...");
+        load("TrainDS.mat", "TrainDS")
+        load("ValDS.mat", "ValDS")
+        load("Test.mat", "Test")
+        disp("Train, validation and test datastores are loaded!");
+        return;
+    end
+
+    if ~isfile('neighInputOdd.mat') && ~isfile('targetInputOddCentered.mat') && ~isfile('targetInputEvenCentered.mat')
+        loadOrCacheNGSIMData()
+    end
+
+    disp("Loading neighbor and target datas...");
+    load('neighInputOdd.mat', 'input_neigh_odd')
+    load('targetInputOddCentered.mat', "input_target_odd_centered")
+    load('targetInputEvenCentered.mat', 'input_target_even_centered')
+    disp("Neighbor and target datas are loaded!");
+
     numSamples = size(input_target_odd_centered, 3);
+
+    if ~isnan(seed)
+        rng(seed);
+    end
+
     shuffledIdx = randperm(numSamples);
 
     nTrain = floor(0.70 * numSamples);
     nVal   = floor(0.15 * numSamples);
-
     trainIdx = shuffledIdx(1:nTrain);
     valIdx   = shuffledIdx(nTrain+1:nTrain+nVal);
     testIdx  = shuffledIdx(nTrain+nVal+1:end);
 
-    % Prepare arrayDatastores
+    % Create arrayDatastores
     X1Train = arrayDatastore(input_neigh_odd(:,:,:,:,trainIdx), "IterationDimension", 5);
     X1Val   = arrayDatastore(input_neigh_odd(:,:,:,:,valIdx), "IterationDimension", 5);
-    Test.X1Test  = input_neigh_odd(:,:,:,:,testIdx);
+    Test.X1Test = input_neigh_odd(:,:,:,:,testIdx);
 
     X2Train = arrayDatastore(input_target_odd_centered(:,:,trainIdx), "IterationDimension", 3);
     X2Val   = arrayDatastore(input_target_odd_centered(:,:,valIdx), "IterationDimension", 3);
-    Test.X2Test  = input_target_odd_centered(:,:,testIdx);
+    Test.X2Test = input_target_odd_centered(:,:,testIdx);
 
     YTrain = arrayDatastore(input_target_even_centered(:,:,trainIdx), "IterationDimension", 3);
     YVal   = arrayDatastore(input_target_even_centered(:,:,valIdx), "IterationDimension", 3);
-    Test.YTest  = input_target_even_centered(:,:,testIdx);
+    Test.YTest = input_target_even_centered(:,:,testIdx);
 
-    % Combine input-output pairs into datastores
+    % Combine input-output for training
     TrainDS = combine(X1Train, X2Train, YTrain);
     ValDS   = combine(X1Val, X2Val, YVal);
 
-    % Save prepared datasets
-    save("TrainValTest/TrainDS.mat", "TrainDS", "-v7.3");
-    save("TrainValTest/ValDS.mat", "ValDS", "-v7.3");
-    save("TrainValTest/Test.mat", "Test", "-v7.3");
+    % Save datasets
+    save("TrainDS.mat", "TrainDS", "-v7.3");
+    save("ValDS.mat", "ValDS", "-v7.3");
+    save("Test.mat", "Test", "-v7.3");
 end
 
 function plot_vehicle_frames(carID, frameIDRange, data)
@@ -136,28 +153,26 @@ function plot_vehicle_frames(carID, frameIDRange, data)
 %   carID         : (double) ID of the vehicle to track
 %   frameIDRange  : (array of double) list of frame IDs to visualize
 %   data          : (table) full dataset containing vehicle information
-%   boxWidth      : (double, optional) width of surrounding box (default: 36 ft)
-%   boxHeight     : (double, optional) height of surrounding box (default: 195 ft)
 %
 % OUTPUTS:
 %   None (this function generates a figure/animation)
-arguments
-    carID double
-    frameIDRange double
-    data table
-end
+    arguments
+        carID double
+        frameIDRange double
+        data table
+    end
 
     figure;
     for idx = 1:length(frameIDRange)
         frameID = frameIDRange(idx);
         clf;  % Clear figure for new frame
-        plotCars(carID, frameID, data, boxWidth, boxHeight);  % Plot current frame
+        plotCars(carID, frameID, data);  % Plot current frame
         drawnow;  % Force drawing update
         pause(0.1);  % Delay between frames for animation effect
     end
 end
 
-function plotCars(carID, frameID, data)
+function plotCars(carID, frameID, data, boxWidth, boxHeight)
 % PLOTCARS plots vehicles surrounding a target car in a given frame.
 %
 % INPUTS:
@@ -170,11 +185,13 @@ function plotCars(carID, frameID, data)
 % OUTPUTS:
 %   None (draws a static plot for the given frame)
 
-arguments
-    carID double
-    frameID double
-    data table
-end
+    arguments
+        carID double
+        frameID double
+        data table
+        boxWidth double {mustBeNumeric} = 36 
+        boxHeight double {mustBeNumeric} = 195
+    end
 
     % Get vehicles within the area-of-interest for the target car
     vhclInBox = vhclBox(carID, frameID, data);
@@ -260,18 +277,18 @@ function [vhclInBox, occupancyGrid] = vhclBox(carID, frameID, data, boxWidth, bo
 % OUTPUTS:
 %   vhclInBox      : (table) vehicles inside the observation box (relative positions)
 %   occupancyGrid  : (39x1 binary vector) occupancy of 3x13 grid cells
-arguments (Input)
-    carID int8
-    frameID double
-    data table
-    boxWidth double = 36
-    boxHeight double = 195
-end
-
-arguments (Output)
-    vhclInBox (:,7) table
-    occupancyGrid (39,1) int8
-end
+    arguments (Input)
+        carID int32
+        frameID double
+        data table
+        boxWidth double = 36
+        boxHeight double = 195
+    end
+    
+    arguments (Output)
+        vhclInBox (:,7) table
+        occupancyGrid (39,1) int32
+    end
 
     vhcl = data(data.Vehicle_ID == carID & data.Frame_ID == frameID, :);
     vhclInFrame = data(data.Frame_ID == frameID, :);
@@ -334,17 +351,17 @@ function gridMatrix = get_occupancy_grid_over_frames(carID, frameIDRange, data, 
 %
 % OUTPUT:
 %   gridMatrix   : (39 x N) binary occupancy matrix where each column is a frame
-arguments (Input)
-    carID double
-    frameIDRange double
-    data table
-    boxWidth double = 36
-    boxHeight double = 195
-end
-
-arguments (Output)
-    gridMatrix (39,:) double
-end
+    arguments (Input)
+        carID double
+        frameIDRange double
+        data table
+        boxWidth double = 36
+        boxHeight double = 195
+    end
+    
+    arguments (Output)
+        gridMatrix (39,:) double
+    end
 
     numFrames = length(frameIDRange);
     gridMatrix = zeros(39, numFrames);  % Preallocate 39xT occupancy matrix
@@ -367,16 +384,15 @@ function targetData = get_target_data_over_frames(carID, frameIDRange, data)
 % OUTPUT:
 %   targetData    : (N x 3 matrix) where N is the number of frames;
 %                   Columns correspond to [Local_X, Local_Y, Velocity] for each frame
-
-arguments (Input)
-    carID double
-    frameIDRange double
-    data table
-end
-
-arguments (Output)
-    targetData (:,3) double
-end
+    arguments (Input)
+        carID double
+        frameIDRange double
+        data table
+    end
+    
+    arguments (Output)
+        targetData (:,3) double
+    end
 
     numFrames = length(frameIDRange);
     targetData = zeros(numFrames, 3);  % Preallocate output
@@ -403,15 +419,15 @@ function car_chunks = get_occupancy_grid_chunks(carID, data, chunkSize)
 %                 - 13 x 3 is the spatial occupancy grid (rows x columns)
 %                 - 30 is the number of frames (timesteps) per input or output
 %                 - N is the number of input/output pairs (chunks)
-arguments (Input)
-    carID double
-    data table
-    chunkSize double = 60
-end
-
-arguments (Output)
-    car_chunks (13,3,30,:) double
-end
+    arguments (Input)
+        carID double
+        data table
+        chunkSize double = 60
+    end
+    
+    arguments (Output)
+        car_chunks (13,3,30,:) double
+    end
 
     % Extract rows for this vehicle
     carRows = data(data.Vehicle_ID == carID, :);
@@ -469,15 +485,15 @@ function target_chunks = get_target_data_chunks(carID, data, chunkSize)
 % OUTPUT:
 %   target_chunks : (3D array or empty) [30x3xN] where N is number of chunks.
 %                   Each chunk is a pair: first 30 frames = input, next 30 = target.
-arguments (Input)
-    carID double
-    data table
-    chunkSize double = 60
-end
-
-arguments (Output)
-    target_chunks (30,3,:) double
-end
+    arguments (Input)
+        carID double
+        data table
+        chunkSize double = 60
+    end
+    
+    arguments (Output)
+        target_chunks (30,3,:) double
+    end
 
     carRows = data(data.Vehicle_ID == carID, :);
     allFrames = unique(carRows.Frame_ID);
@@ -521,13 +537,13 @@ function all_chunks_combined = all_chunks(datas)
 %
 % OUTPUT:
 %   all_chunks_combined : (4D array) occupancy chunks [39x30x1xN]
-arguments (Input)
-    datas (1,6) cell
-end
-
-arguments (Output)
-    all_chunks_combined (39,30,1,:) int8
-end
+    arguments (Input)
+        datas (1,6) cell
+    end
+    
+    arguments (Output)
+        all_chunks_combined (39,30,1,:) int32
+    end
 
     all_chunks_cell = {};
 
@@ -568,13 +584,13 @@ function all_target_chunks_combined = all_target_chunks(datas)
 %
 % OUTPUT:
 %   all_target_chunks_combined : (3D array) [30x3xN] input/target sequence pairs
-arguments (Input)
-    datas (1,6) cell
-end
-
-arguments (Output)
-    all_target_chunks_combined (30,3,:) double
-end
+    arguments (Input)
+        datas (1,6) cell
+    end
+    
+    arguments (Output)
+        all_target_chunks_combined (30,3,:) double
+    end
 
     all_chunks_cell = {};
 
@@ -606,12 +622,6 @@ end
     all_target_chunks_combined = cat(3, all_chunks_cell{:});
 end
 
-disp("Train, validation and test datasets are loading...");
-load TrainDS.mat
-load ValDS.mat
-load Test.mat
-disp("Train, validation and test datasets are loaded!");
-
 function [trainedNetwork, trainingInfo] = trainNetwork(TrainDS, ValDS)
 % TRAINNETWORK trains or loads a deep learning model on traffic sequence data.
 %
@@ -622,15 +632,15 @@ function [trainedNetwork, trainingInfo] = trainNetwork(TrainDS, ValDS)
 % OUTPUTS:
 %   trainedNetwork : Trained dlnetwork object
 %   trainingInfo   : Struct with training metrics (loss, validation accuracy, etc.)
-arguments (Input)
-    TrainDS
-    ValDS 
-end
-
-arguments (Output)
-    trainedNetwork dlnetwork
-    trainingInfo
-end
+    arguments (Input)
+        TrainDS
+        ValDS 
+    end
+    
+    arguments (Output)
+        trainedNetwork dlnetwork
+        trainingInfo
+    end
 
     % Load cached model if exists
     if isfile("trainedNetwork.mat") && isfile("trainingInfo.mat")
@@ -692,7 +702,7 @@ end
     net = addLayers(net, layers1);
     net = addLayers(net, layers2);
     net = connectLayers(net, "bilstm2", "cat/in2");  % Connect ego path to CNN path
-
+    
     % Train the network using combined loss
     [trainedNetwork, trainingInfo] = trainnet(TrainDS, net, "l2loss", options);
 
@@ -700,8 +710,6 @@ end
     save("trainedNetwork.mat", "trainedNetwork");
     save("trainingInfo.mat", "trainingInfo");
 end
-
-[trainedNetwork, trainingInfo] = trainNetwork(TrainDS, ValDS);
 
 function results = evaluateModel(trainedNetwork, Test)
 % EVALUATEMODEL computes predictions and evaluates performance on the test dataset.
@@ -717,14 +725,14 @@ function results = evaluateModel(trainedNetwork, Test)
 %   results : Struct with fields:
 %               - mse       : Mean squared error across all predictions
 %               - YPredMat  : [30 x 3 x N] Predicted outputs (same shape as YTest)
-arguments (Input)
-    trainedNetwork dlnetwork
-    Test struct
-end
-
-arguments (Output)
-    results struct
-end
+    arguments (Input)
+        trainedNetwork dlnetwork
+        Test struct
+    end
+    
+    arguments (Output)
+        results struct
+    end
 
     % Predict using minibatches for performance (cell output)
     predictedTarget = minibatchpredict( ...
@@ -743,17 +751,170 @@ end
     % Convert each prediction (cell) into 3D matrix
     for i = 1:nSamples
         YPredMat(:,:,i) = predictedTarget{i};
+
+        % Compute mean squared error
+        squaredError = (YPredMat(:,:,i) - Test.YTest(:,:,i)).^2;
+        % mse = mean(squaredError, 2);
+        results.mse{:,i} = squaredError;
     end
 
-    % Compute mean squared error over all dimensions
-    squaredError = (YPredMat - Test.YTest).^2;
-    mse = mean(squaredError, 'all');
-
-    % Package output
-    results.mse = mse;
     results.YPredMat = YPredMat;
 end
 
-results = evaluateModel(trainedNetwork, Test);
+function Test = generate_single_test(vehicleID)
+    % GENERATE_SINGLE_TEST creates a test sample for a specific vehicle ID
+    % and plots the vehicle's predicted 30-frame trajectory using a trained model.
 
-disp("Mean-squared error is " + results.mse)
+    % Load necessary data
+    load("ngsim_cached_data.mat", "datas")
+    load('neighInputOdd.mat', 'input_neigh_odd')
+    load('targetInputOddCentered.mat', "input_target_odd_centered")
+    load('targetInputEvenCentered.mat', 'input_target_even_centered')
+
+    % Extract dataset (assuming 1st split is used)
+    data = datas{1};
+
+    % Identify the observation index for this vehicle
+    [~, ia, ~] = unique(data(:,1), 'stable');
+    vehicle_ids = data{ia, 1};
+    target_index = find(vehicle_ids == vehicleID);
+    total_frames_per_vehicle = data{ia, 3};
+    observations_before = sum(floor(total_frames_per_vehicle(1:target_index - 1) / 60));
+    obsIndex = observations_before + 1;
+
+    % Create the Test struct (single observation)
+    Test.X1Test = input_neigh_odd(:,:,:,:,obsIndex);
+    Test.X2Test = input_target_odd_centered(:,:,obsIndex);
+    Test.YTest  = input_target_even_centered(:,:,obsIndex);
+
+    % === Get frame IDs for animation ===
+    vehicle_rows = data(data.Vehicle_ID == vehicleID, :);
+    frame_ids = vehicle_rows.Frame_ID;  % Sorted automatically
+    local_obs_index = obsIndex - observations_before;
+
+    % Extract the 30 previous frames (frames 1-30 of the observation)
+    start_idx = (local_obs_index - 1) * 60 + 1;
+    end_idx   = start_idx + 29;
+    prediction_frames = frame_ids(start_idx:end_idx);
+
+    % === Plot surrounding vehicles during predicted frames ===
+    plot_vehicle_frames(vehicleID, prediction_frames, data);
+end
+
+mode = input("Choose mode:\n1 - Single vehicle test\n2 - Train full model\nEnter choice (1 or 2): ");
+
+switch mode
+    case 1  % === Single vehicle test ===
+        success = false;
+        while ~success
+            try
+                vehicleID = input("Enter vehicle ID to test: ");
+                Test = generate_single_test(vehicleID);  % This may throw an error
+
+                % Load trained model
+                if ~isfile("trainedNetwork.mat")
+                    error("Model not found. Please run full training first (choose option 2).");
+                end
+                load("trainedNetwork.mat", "trainedNetwork");
+
+                % Evaluate model
+                results = evaluateModel(trainedNetwork, Test);
+
+                % Plot predicted trajectory
+                dx = results.YPredMat(:,1);
+                dy = results.YPredMat(:,2);
+
+                hold on;
+
+                % Plot the main trajectory line with reduced opacity
+                plot(dx, dy, '-', 'LineWidth', 3, 'Color', [1, 0, 0, 0.3]);
+                
+                % Add arrows every 5 points
+                step = 5;
+                for i = 1:step:(length(dx) - 1)
+                    u = dx(i+1) - dx(i);
+                    v = dy(i+1) - dy(i);
+                    
+                    scale = 1.5;  % arrow size scaling
+                    quiver(dx(i), dy(i), u, v, scale, ...
+                           'Color', 'black', 'LineWidth', 2, 'MaxHeadSize', 2, 'AutoScale', 'off');
+                end
+                
+                % Mark the endpoint
+                scatter(dx(end), dy(end), 40, 'r', 'filled');
+                
+                hold off;
+
+                success = true;  % Exit loop on success
+
+            catch ME
+                fprintf("The car %d is not in the dataset.\n", vehicleID);
+                fprintf("Please try a different vehicle ID.\n\n");
+            end
+        end
+
+    case 2  % === Full model training and test set evaluation ===
+        % Prepare datasets
+        [TrainDS, ValDS, Test] = split_and_prepare_datasets(1);
+
+        % Train and save model
+        [trainedNetwork, ~] = trainNetwork(TrainDS, ValDS);
+        save("trainedNetwork.mat", "trainedNetwork", "-v7.3");
+
+        % Evaluate on test set (Test contains full test arrays)
+        results = evaluateModel(trainedNetwork, Test);
+        disp("Model evaluation complete on full test set.");
+
+    otherwise
+        error("Invalid selection. Please enter 1 or 2.");
+end
+
+% %%
+% % Extract data
+% a = results.mse{20001};
+% b = results.mse{20002};
+% c = results.mse{20003};
+% d = results.mse{20004};
+% 
+% % --- Plot X Differences ---
+% figure;
+% hold on;
+% plot(a(:,1))
+% plot(b(:,1))
+% plot(c(:,1))
+% plot(d(:,1))
+% xlabel('frame ID', 'Interpreter', 'latex');
+% ylabel('X Differences (Real - Predicted)', 'Interpreter', 'latex');
+% set(gca, 'TickLabelInterpreter', 'latex');
+% legend({'Observation 20001', 'Observation 20002', 'Observation 20003', 'Observation 20004'}, 'Interpreter', 'latex');
+% set(gcf, 'PaperPositionMode', 'auto');
+% exportgraphics(gcf, 'xDiff.pdf', 'ContentType', 'vector');
+% 
+% % --- Plot Y Differences ---
+% figure;
+% hold on;
+% plot(a(:,2))
+% plot(b(:,2))
+% plot(c(:,2))
+% plot(d(:,2))  % Fixed from d(:,3) to d(:,2) for consistency
+% xlabel('frame ID', 'Interpreter', 'latex');
+% ylabel('Y Differences (Real - Predicted)', 'Interpreter', 'latex');
+% set(gca, 'TickLabelInterpreter', 'latex');
+% legend({'Observation 20001', 'Observation 20002', 'Observation 20003', 'Observation 20004'}, 'Interpreter', 'latex');
+% set(gcf, 'PaperPositionMode', 'auto');
+% exportgraphics(gcf, 'yDiff.pdf', 'ContentType', 'vector');  % Different filename!
+% 
+% % --- Plot Velocity Differences ---
+% figure;
+% hold on;
+% plot(a(:,3))
+% plot(b(:,3))
+% plot(c(:,3))
+% plot(d(:,3))
+% xlabel('frame ID', 'Interpreter', 'latex');
+% ylabel('Velocity Differences (Real - Predicted)', 'Interpreter', 'latex');
+% set(gca, 'TickLabelInterpreter', 'latex');
+% legend({'Observation 20001', 'Observation 20002', 'Observation 20003', 'Observation 20004'}, 'Interpreter', 'latex');
+% set(gcf, 'PaperPositionMode', 'auto');
+% exportgraphics(gcf, 'vDiff.pdf', 'ContentType', 'vector');  % Different filename!
+
