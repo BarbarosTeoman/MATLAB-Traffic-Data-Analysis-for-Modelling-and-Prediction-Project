@@ -1,2 +1,5 @@
 TrainDS.mat filter=lfs diff=lfs merge=lfs -text
 ngsim_cached_data.mat filter=lfs diff=lfs merge=lfs -text
+targetInputEvenCentered.mat filter=lfs diff=lfs merge=lfs -text
+targetInputOddCentered.mat filter=lfs diff=lfs merge=lfs -text
+neighInputOdd.mat filter=lfs diff=lfs merge=lfs -text
