@@ -811,38 +811,38 @@ switch mode
                 vehicleID = input("Enter vehicle ID to test: ");
                 Test = generate_single_test(vehicleID);  % This may throw an error
 
-                % Load trained model
+                %Load trained model
                 if ~isfile("trainedNetwork.mat")
                     error("Model not found. Please run full training first (choose option 2).");
                 end
                 load("trainedNetwork.mat", "trainedNetwork");
 
-                % Evaluate model
+                %Evaluate model
                 results = evaluateModel(trainedNetwork, Test);
 
-                % Plot predicted trajectory
+                %Plot predicted trajectory
                 dx = results.YPredMat(:,1);
                 dy = results.YPredMat(:,2);
 
                 hold on;
 
-                % Plot the main trajectory line with reduced opacity
+                %Plot the main trajectory line with reduced opacity
                 plot(dx, dy, '-', 'LineWidth', 3, 'Color', [1, 0, 0, 0.3]);
-                
-                % Add arrows every 5 points
+
+                %Add arrows every 5 points
                 step = 5;
                 for i = 1:step:(length(dx) - 1)
                     u = dx(i+1) - dx(i);
                     v = dy(i+1) - dy(i);
-                    
+
                     scale = 1.5;  % arrow size scaling
                     quiver(dx(i), dy(i), u, v, scale, ...
                            'Color', 'black', 'LineWidth', 2, 'MaxHeadSize', 2, 'AutoScale', 'off');
                 end
-                
-                % Mark the endpoint
+
+                %Mark the endpoint
                 scatter(dx(end), dy(end), 40, 'r', 'filled');
-                
+
                 hold off;
 
                 success = true;  % Exit loop on success
@@ -854,67 +854,17 @@ switch mode
         end
 
     case 2  % === Full model training and test set evaluation ===
-        % Prepare datasets
+        %Prepare datasets
         [TrainDS, ValDS, Test] = split_and_prepare_datasets(1);
 
-        % Train and save model
+        %Train and save model
         [trainedNetwork, ~] = trainNetwork(TrainDS, ValDS);
         save("trainedNetwork.mat", "trainedNetwork", "-v7.3");
 
-        % Evaluate on test set (Test contains full test arrays)
+        %Evaluate on test set (Test contains full test arrays)
         results = evaluateModel(trainedNetwork, Test);
         disp("Model evaluation complete on full test set.");
 
     otherwise
         error("Invalid selection. Please enter 1 or 2.");
 end
-
-% %%
-% % Extract data
-% a = results.mse{20001};
-% b = results.mse{20002};
-% c = results.mse{20003};
-% d = results.mse{20004};
-% 
-% % --- Plot X Differences ---
-% figure;
-% hold on;
-% plot(a(:,1))
-% plot(b(:,1))
-% plot(c(:,1))
-% plot(d(:,1))
-% xlabel('frame ID', 'Interpreter', 'latex');
-% ylabel('X Differences (Real - Predicted)', 'Interpreter', 'latex');
-% set(gca, 'TickLabelInterpreter', 'latex');
-% legend({'Observation 20001', 'Observation 20002', 'Observation 20003', 'Observation 20004'}, 'Interpreter', 'latex');
-% set(gcf, 'PaperPositionMode', 'auto');
-% exportgraphics(gcf, 'xDiff.pdf', 'ContentType', 'vector');
-% 
-% % --- Plot Y Differences ---
-% figure;
-% hold on;
-% plot(a(:,2))
-% plot(b(:,2))
-% plot(c(:,2))
-% plot(d(:,2))  % Fixed from d(:,3) to d(:,2) for consistency
-% xlabel('frame ID', 'Interpreter', 'latex');
-% ylabel('Y Differences (Real - Predicted)', 'Interpreter', 'latex');
-% set(gca, 'TickLabelInterpreter', 'latex');
-% legend({'Observation 20001', 'Observation 20002', 'Observation 20003', 'Observation 20004'}, 'Interpreter', 'latex');
-% set(gcf, 'PaperPositionMode', 'auto');
-% exportgraphics(gcf, 'yDiff.pdf', 'ContentType', 'vector');  % Different filename!
-% 
-% % --- Plot Velocity Differences ---
-% figure;
-% hold on;
-% plot(a(:,3))
-% plot(b(:,3))
-% plot(c(:,3))
-% plot(d(:,3))
-% xlabel('frame ID', 'Interpreter', 'latex');
-% ylabel('Velocity Differences (Real - Predicted)', 'Interpreter', 'latex');
-% set(gca, 'TickLabelInterpreter', 'latex');
-% legend({'Observation 20001', 'Observation 20002', 'Observation 20003', 'Observation 20004'}, 'Interpreter', 'latex');
-% set(gcf, 'PaperPositionMode', 'auto');
-% exportgraphics(gcf, 'vDiff.pdf', 'ContentType', 'vector');  % Different filename!
-
