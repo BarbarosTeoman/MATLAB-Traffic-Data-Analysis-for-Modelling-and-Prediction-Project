@@ -1,5 +1,8 @@
 # MATLAB-Traffic-Data-Analysis-for-Modelling-and-Prediction-Project
 
+>This project was developed for **MYZ 307E – Machine Learning for Electrical and Electronics Engineering**  
+(CRN 22220), Istanbul Technical University, Spring 2025.
+
 ## Quick start
 
 > **MATLAB R2022b +** Deep Learning Toolbox & Parallel Computing Toolbox (GPU optional)
